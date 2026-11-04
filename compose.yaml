@@ -1,0 +1,33 @@
+name: dsoft-audiotts
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: dsoft-audiotts-backend:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-8088}:8088"
+    environment:
+      SPEAKER_DATA_DIR: /app/backend/data
+      # Phải là địa chỉ server mà ESP32 truy cập được, không phải IP bridge của container.
+      SPEAKER_PUBLIC_URL: "${SPEAKER_PUBLIC_URL:-http://localhost:8088}"
+    volumes:
+      - speaker-data:/app/backend/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  speaker-data:

@@ -1,0 +1,38 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "P01: Mo dashboard web demo",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/dashboard.ps1"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "P01: Build ESP32-S3",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/build.ps1"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "P01: Mo code cau hinh WiFi - Server",
+            "type": "process",
+            "command": "${execPath}",
+            "args": ["--reuse-window", "${workspaceFolder}/main/speaker_config.h"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "P01: Kiem thu backend",
+            "type": "process",
+            "command": "python",
+            "args": ["-m", "pytest", "backend/tests", "-q"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        }
+    ]
+}

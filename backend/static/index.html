@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#123d38" />
+    <title>DSOFT · Voice Lab</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="DSOFT Voice Lab">
+        <span class="brand-mark" aria-hidden="true"
+          ><i></i><i></i><i></i><i></i
+        ></span>
+        <span>DSOFT<span class="brand-sub">VOICE LAB</span></span>
+      </a>
+      <div class="workspace-label">KHÔNG GIAN THỬ NGHIỆM</div>
+      <nav aria-label="Điều hướng">
+        <button class="nav-button active" data-view="play" aria-current="page">
+          <span class="nav-icon">◉</span> Phát thử
+          <span class="nav-arrow">↗</span>
+        </button>
+        <button class="nav-button" data-view="settings">
+          <span class="nav-icon">≋</span> Cấu hình TTS
+        </button>
+        <button class="nav-button" data-view="devices">
+          <span class="nav-icon">▣</span> Kết nối ESP32
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="hardware-card">
+          <span class="hardware-dot"></span>
+          <div>WiFi Speaker<span>ESP32-S3 + MAX98357A</span></div>
+          <span class="tiny-badge">P01</span>
+        </div>
+        <a href="/docs" target="_blank" rel="noopener" class="docs-link"
+          >Tài liệu API <span>↗</span></a
+        >
+        <div class="sidebar-footnote">Từ văn bản đến tiếng nói.</div>
+      </div>
+    </aside>
+
+    <main class="main-shell">
+      <header class="topbar">
+        <span class="breadcrumb"
+          >Dự án <span>/</span> Loa WiFi <span>/</span>
+          <strong id="breadcrumbView">Phát thử</strong></span
+        >
+        <div class="topbar-right">
+          <span id="serverStatus" class="connection-status"
+            ><span class="status-dot"></span> Chưa kết nối</span
+          ><button id="logoutButton" class="text-button" hidden>Thoát</button>
+        </div>
+      </header>
+      <div class="content">
+        <section
+          id="loginPanel"
+          class="login-panel"
+          aria-labelledby="loginTitle"
+        >
+          <div>
+            <strong id="loginTitle">Kết nối bảng điều khiển</strong>
+            <p>
+              Nhập khóa quản trị của backend. Khi chạy bằng lệnh demo, trang
+              được mở và kết nối tự động.
+            </p>
+          </div>
+          <form id="loginForm" class="login-form">
+            <label class="sr-only" for="operatorKey">Khóa quản trị</label
+            ><input
+              id="operatorKey"
+              type="password"
+              placeholder="Khóa quản trị backend"
+              autocomplete="off"
+              required
+            /><button class="button primary" type="submit">Kết nối</button>
+          </form>
+        </section>
+
+        <div
+          id="notice"
+          class="notice"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+
+        <section class="view" id="view-play" aria-labelledby="playTitle">
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">
+                VOICE PLAYGROUND <span class="small-line"></span> P01
+              </div>
+              <h1 id="playTitle">Một câu nói. Một chạm phát.</h1>
+              <p>Tạo giọng nói từ văn bản và gửi đến loa WiFi của bạn.</p>
+            </div>
+            <span id="providerBadge" class="pill neutral"
+              >TTS chưa cấu hình</span
+            >
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card">
+              <span class="stat-icon green">◉</span>
+              <div>
+                <span class="stat-label">Loa đang kết nối</span>
+                <div>
+                  <strong id="onlineCount">—</strong
+                  ><span id="deviceCount" class="stat-detail">thiết bị</span>
+                </div>
+              </div>
+            </article>
+            <article class="stat-card">
+              <span class="stat-icon amber">≋</span>
+              <div>
+                <span class="stat-label">Đang chờ phát</span>
+                <div>
+                  <strong id="queuedCount">—</strong
+                  ><span class="stat-detail">yêu cầu</span>
+                </div>
+              </div>
+            </article>
+            <article class="stat-card">
+              <span class="stat-icon blue">✓</span>
+              <div>
+                <span class="stat-label">Đã hoàn tất</span>
+                <div>
+                  <strong id="playedCount">—</strong
+                  ><span class="stat-detail">lượt phát</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="play-grid">
+            <section class="card composer-card" aria-labelledby="composerTitle">
+              <div class="card-heading">
+                <div>
+                  <span class="section-index">01</span>
+                  <h2 id="composerTitle">Bạn muốn loa nói gì?</h2>
+                </div>
+                <span class="subtle-label">Tiếng Việt & nhiều ngôn ngữ</span>
+              </div>
+              <form id="speakForm">
+                <label for="speechText" class="sr-only">Nội dung cần đọc</label>
+                <div class="textarea-wrap">
+                  <textarea
+                    id="speechText"
+                    rows="6"
+                    maxlength="1000"
+                    placeholder="Xin chào! Đây là loa WiFi DSOFT. Chúc bạn một ngày làm việc thật tốt."
+                    required
+                  ></textarea
+                  ><span id="characterCount" class="character-count"
+                    >0 / 1.000</span
+                  >
+                </div>
+                <div class="sample-row">
+                  <span>Thử nhanh</span
+                  ><button
+                    type="button"
+                    class="sample-chip"
+                    data-sample="Xin chào! Chúc bạn một buổi sáng tốt lành và một ngày làm việc hiệu quả."
+                  >
+                    Chào buổi sáng</button
+                  ><button
+                    type="button"
+                    class="sample-chip"
+                    data-sample="Thông báo: Cuộc họp sẽ bắt đầu sau năm phút. Mời mọi người chuẩn bị."
+                  >
+                    Thông báo</button
+                  ><button
+                    type="button"
+                    class="sample-chip"
+                    data-sample="Kiểm tra tiếng Việt: Trường Sa, Nguyễn Huệ, số hai mươi lăm và mười giờ ba mươi phút."
+                  >
+                    Thử tiếng Việt
+                  </button>
+                </div>
+                <div class="composer-options">
+                  <div class="field">
+                    <label for="speakerSelect">Phát trên thiết bị</label
+                    ><select id="speakerSelect">
+                      <option value="">Chưa có thiết bị</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="prioritySelect">Mức ưu tiên</label
+                    ><select id="prioritySelect">
+                      <option value="0">Thông thường</option>
+                      <option value="5">Thông báo</option>
+                      <option value="10">Ưu tiên cao</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="volume-row">
+                  <label for="volumeRange">Âm lượng</label
+                  ><input
+                    id="volumeRange"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="70"
+                  /><output for="volumeRange" id="volumeValue">70%</output>
+                </div>
+                <div id="composerHint" class="inline-hint">
+                  Kết nối bảng điều khiển để bắt đầu.
+                </div>
+                <div class="composer-actions">
+                  <button
+                    id="previewButton"
+                    type="button"
+                    class="button secondary"
+                    disabled
+                  >
+                    <span>▷</span> Nghe thử trên web</button
+                  ><button
+                    id="sendButton"
+                    type="submit"
+                    class="button primary"
+                    disabled
+                  >
+                    Phát trên ESP32 <span>↗</span>
+                  </button>
+                </div>
+                <audio
+                  id="previewAudio"
+                  controls
+                  hidden
+                  aria-label="Âm thanh nghe thử"
+                ></audio>
+              </form>
+            </section>
+
+            <aside class="card journey-card">
+              <div class="card-heading">
+                <div>
+                  <span class="section-index">02</span>
+                  <h2>Đường đi của giọng nói</h2>
+                </div>
+              </div>
+              <div class="journey-visual" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span
+                ><span></span><span></span><span></span><span></span
+                ><span></span><span></span>
+              </div>
+              <ol class="journey-list">
+                <li>
+                  <span class="step-dot">1</span>
+                  <div>
+                    <strong>Văn bản của bạn</strong>
+                    <p>Nhập lời chào hoặc thông báo.</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="step-dot">2</span>
+                  <div>
+                    <strong>Dịch vụ TTS</strong>
+                    <p>Tạo giọng nói theo cấu hình đã lưu.</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="step-dot">3</span>
+                  <div>
+                    <strong>Loa ESP32</strong>
+                    <p>Nhận âm thanh, phát và báo kết quả.</p>
+                  </div>
+                </li>
+              </ol>
+              <div class="journey-note">
+                <span>↳</span>
+                <p>
+                  Chưa có loa bên cạnh?<br />Bạn vẫn có thể nghe thử ngay trên
+                  web.
+                </p>
+              </div>
+            </aside>
+          </div>
+
+          <section class="card activity-card" aria-labelledby="activityTitle">
+            <div class="card-heading">
+              <div>
+                <span class="section-index">03</span>
+                <h2 id="activityTitle">Lịch sử phát</h2>
+              </div>
+              <div class="activity-live">
+                <span class="status-dot"></span> Tự cập nhật
+                <button
+                  id="refreshButton"
+                  class="icon-button"
+                  type="button"
+                  aria-label="Làm mới lịch sử"
+                >
+                  ↻
+                </button>
+              </div>
+            </div>
+            <div id="emptyHistory" class="empty-state">
+              <span class="empty-icon">≋</span
+              ><strong>Chưa có lượt phát nào</strong>
+              <p>Gửi câu đầu tiên để theo dõi hành trình đến loa.</p>
+            </div>
+            <div id="historyWrapper" class="table-scroll" hidden>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nội dung</th>
+                    <th>Thiết bị</th>
+                    <th>Trạng thái</th>
+                    <th>Âm lượng</th>
+                    <th>Thời gian</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section
+          class="view"
+          id="view-settings"
+          aria-labelledby="settingsTitle"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">
+                VOICE SETTINGS <span class="small-line"></span> TTS
+              </div>
+              <h1 id="settingsTitle">Chọn giọng nói cho loa.</h1>
+              <p>
+                Kết nối API TTS của bạn. Cấu hình được lưu ở backend và dùng cho
+                cả web lẫn ESP32.
+              </p>
+            </div>
+          </div>
+          <form id="settingsForm" class="card settings-card">
+            <div class="card-heading">
+              <div>
+                <span class="section-index">01</span>
+                <h2>Dịch vụ tạo giọng nói</h2>
+              </div>
+              <span id="settingsState" class="subtle-label"
+                >Chưa tải cấu hình</span
+              >
+            </div>
+            <div class="settings-body">
+              <div class="field">
+                <label for="ttsProvider">Nguồn âm thanh</label
+                ><select id="ttsProvider">
+                  <option value="">Chưa cấu hình</option>
+                  <option value="http">API TTS của bạn</option>
+                  <option value="tone">Âm mẫu · beep một giây</option>
+                </select>
+                <p class="field-help" id="providerHelp">
+                  Chọn API TTS để đọc văn bản, hoặc âm mẫu để thử đường truyền
+                  tới loa.
+                </p>
+              </div>
+              <fieldset id="httpSettings">
+                <legend class="sr-only">Thông tin API TTS</legend>
+                <div class="field">
+                  <label for="ttsUrl"
+                    >URL API TTS <span class="required">*</span></label
+                  ><input
+                    id="ttsUrl"
+                    type="url"
+                    placeholder="https://your-tts-service.com/api/speech"
+                  />
+                  <p class="field-help">
+                    Endpoint nhận POST và trả binary audio (PCM, WAV hoặc MP3).
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="ttsApiKey">Khóa API</label
+                  ><input
+                    id="ttsApiKey"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Nhập khóa của nhà cung cấp"
+                  />
+                  <div class="key-help">
+                    <span id="keyStatus">Chưa lưu khóa API.</span
+                    ><label class="checkbox-label"
+                      ><input id="clearApiKey" type="checkbox" /> Xóa khóa đã
+                      lưu</label
+                    >
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="ttsVoice">Giọng đọc / Voice ID</label
+                    ><input id="ttsVoice" value="default" maxlength="160" />
+                  </div>
+                  <div class="field">
+                    <label for="ttsModel"
+                      >Model <span class="optional">không bắt buộc</span></label
+                    ><input
+                      id="ttsModel"
+                      maxlength="160"
+                      placeholder="Tên model của dịch vụ"
+                    />
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="ttsFormat">Định dạng API trả về</label
+                  ><select id="ttsFormat">
+                    <option value="pcm">PCM16 · mono · 24 kHz</option>
+                    <option value="wav">WAV</option>
+                    <option value="mp3">MP3</option>
+                  </select>
+                  <p class="field-help">
+                    MP3 và WAV khác mono 24 kHz cần ffmpeg trên máy chủ.
+                  </p>
+                </div>
+                <details class="advanced-settings">
+                  <summary>
+                    JSON request & xác thực nâng cao <span>+</span>
+                  </summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="authHeader">Tên header khóa API</label
+                      ><input
+                        id="authHeader"
+                        value="Authorization"
+                        placeholder="Authorization hoặc xi-api-key"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="authPrefix">Tiền tố</label
+                      ><input
+                        id="authPrefix"
+                        value="Bearer"
+                        placeholder="Để trống nếu chỉ gửi khóa"
+                      />
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="bodyTemplate">JSON gửi tới API</label
+                    ><textarea
+                      id="bodyTemplate"
+                      class="code-input"
+                      rows="8"
+                      spellcheck="false"
+                    ></textarea>
+                    <p class="field-help">
+                      Dùng <code>{{text}}</code>, <code>{{voice}}</code>,
+                      <code>{{model}}</code> để chèn nội dung. API trả JSON chứa
+                      URL âm thanh cần bổ sung adapter trong backend/tts.py.
+                    </p>
+                  </div>
+                </details>
+              </fieldset>
+              <div id="toneNote" class="info-box" hidden>
+                Âm mẫu chỉ phát một tiếng beep để kiểm tra kết nối. Chế độ này
+                không chuyển văn bản thành giọng nói.
+              </div>
+            </div>
+            <div class="form-footer">
+              <span>Khóa API không được gửi xuống ESP32.</span
+              ><button
+                id="saveSettingsButton"
+                class="button primary"
+                type="submit"
+              >
+                Lưu cấu hình <span>✓</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section
+          class="view"
+          id="view-devices"
+          aria-labelledby="devicesTitle"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">
+                DEVICE CONNECTION <span class="small-line"></span> ESP32
+              </div>
+              <h1 id="devicesTitle">Đưa giọng nói đến thiết bị.</h1>
+              <p>
+                Đăng ký loa và dùng cùng thông tin kết nối trong firmware
+                ESP-IDF.
+              </p>
+            </div>
+          </div>
+          <div class="device-grid">
+            <section class="card">
+              <div class="card-heading">
+                <div>
+                  <span class="section-index">01</span>
+                  <h2>Thiết bị của bạn</h2>
+                </div>
+              </div>
+              <div class="settings-body">
+                <div id="deviceList" class="device-list">
+                  <p class="muted">Kết nối bảng điều khiển để xem thiết bị.</p>
+                </div>
+                <form id="deviceForm" class="device-form">
+                  <h3>Thêm hoặc cập nhật loa</h3>
+                  <div class="field">
+                    <label for="newDeviceId">Device ID</label
+                    ><input
+                      id="newDeviceId"
+                      value="speaker-01"
+                      pattern="[A-Za-z0-9_\-]{1,64}"
+                      required
+                      maxlength="64"
+                    />
+                  </div>
+                  <div class="field">
+                    <label for="newDeviceToken"
+                      >Device token
+                      <span class="optional">không bắt buộc</span></label
+                    ><input
+                      id="newDeviceToken"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder="Để trống: giữ khóa cũ hoặc tự tạo"
+                    />
+                    <p class="field-help">
+                      Nếu tự nhập, dùng 16–200 ký tự, không có khoảng trắng.
+                    </p>
+                  </div>
+                  <button
+                    id="saveDeviceButton"
+                    class="button secondary"
+                    type="submit"
+                  >
+                    Lưu thiết bị <span>+</span>
+                  </button>
+                </form>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-heading">
+                <div>
+                  <span class="section-index">02</span>
+                  <h2>Cấu hình trên ESP32</h2>
+                </div>
+              </div>
+              <div class="settings-body">
+                <div class="field">
+                  <label for="connectionDevice">Chọn thiết bị</label
+                  ><select id="connectionDevice">
+                    <option value="">Chọn loa</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="connectionUrl">URL backend cho ESP32</label
+                  ><input
+                    id="connectionUrl"
+                    readonly
+                    placeholder="Chọn thiết bị để xem"
+                  />
+                  <p class="field-help">
+                    ESP32 và máy chủ cần cùng mạng. Không dùng localhost trên
+                    ESP32.
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="connectionToken">Device token</label>
+                  <div class="secret-row">
+                    <input
+                      id="connectionToken"
+                      readonly
+                      type="password"
+                      autocomplete="off"
+                    /><button
+                      id="revealTokenButton"
+                      class="button secondary small"
+                      type="button"
+                    >
+                      Hiện
+                    </button>
+                  </div>
+                </div>
+                <div class="setup-steps">
+                  <strong>Sửa main/speaker_config.h</strong>
+                  <ol>
+                    <li>
+                      Điền <b>backend_url</b>, <b>device_id</b> và
+                      <b>device_token</b> trong file cấu hình.
+                    </li>
+                    <li id="httpInstruction">
+                      Nếu thử HTTP trong LAN, đặt
+                      <b>allow_http_for_development = true</b>.
+                    </li>
+                    <li>Điền wifi_ssid, wifi_password, lưu file rồi build/nạp lại.</li>
+                  </ol>
+                </div>
+                <button
+                  id="copyConnectionButton"
+                  class="button primary"
+                  type="button"
+                  disabled
+                >
+                  Sao chép code cấu hình C++ <span>↗</span>
+                </button>
+                <p class="field-help">
+                  Loa hiện “Đang kết nối” sau khi firmware hỏi backend. Trạng
+                  thái không được mô phỏng.
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+        <footer class="page-footer">
+          <span>DSOFT · Voice Lab</span><span>Văn bản → TTS → WiFi → Loa</span
+          ><span>ESP-IDF / P01</span>
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>

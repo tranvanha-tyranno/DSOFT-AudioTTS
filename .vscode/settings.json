@@ -1,0 +1,30 @@
+{
+    "files.encoding": "utf8",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "editor.tabSize": 4,
+    "editor.minimap.enabled": false,
+    "editor.rulers": [100],
+    "files.associations": { "*.h": "cpp", "Kconfig*": "kconfig" },
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "files.exclude": {
+        "**/build": true,
+        "**/build-*": true,
+        "**/*.log": true,
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/.venv": true,
+        "sdkconfig": true,
+        "sdkconfig.old": true,
+        "sdkconfig*.bak": true,
+        "sdkconfig.buildcheck*": true,
+        "backend/data": true
+    },
+    "search.exclude": {
+        "**/build*/**": true,
+        "**/*.log": true,
+        "**/.venv/**": true,
+        "**/__pycache__/**": true,
+        "backend/data/**": true
+    }
+}

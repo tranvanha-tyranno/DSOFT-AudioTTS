@@ -1,0 +1,15 @@
+# Chỉ gửi mã backend và static assets vào Docker build context.
+# Firmware chứa cấu hình WiFi riêng, SQLite, token và cache không vào image.
+**
+!backend/
+backend/**
+!backend/*.py
+!backend/requirements.txt
+!backend/static/
+!backend/static/**
+
+# Loại trừ cuối cùng, kể cả khi thêm mẫu cho phép phía trên.
+backend/data/
+backend/tests/
+backend/__pycache__/
+backend/.env*
