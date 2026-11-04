@@ -26,6 +26,39 @@ docker compose ps
 
 Mở `http://IP_SERVER:8088/`. Chờ service có trạng thái `healthy`.
 
+## Server chỉ pull image đã build
+
+Image: `ghcr.io/tranvanha-tyranno/dsoft-audiotts-backend:latest` cho máy chủ **Linux amd64/x86_64**. Workflow `Publish backend image` tự build/push khi mã backend thay đổi trên nhánh `main`; cũng có thể chạy thủ công trong tab Actions. Repo/package giữ private.
+
+Trên server, cập nhật code và cấu hình `.env` (chỉ cần sao chép file mẫu ở lần đầu):
+
+```sh
+git pull
+# Lần đầu: cp .env.example .env
+```
+
+Trong `.env` điền ba dòng sau, thay IP/domain thật:
+
+```dotenv
+DASHBOARD_PORT=8088
+SPEAKER_PUBLIC_URL=http://YOUR_SERVER_IP:8088
+SPEAKER_IMAGE=ghcr.io/tranvanha-tyranno/dsoft-audiotts-backend:latest
+```
+
+Đăng nhập GHCR một lần bằng tài khoản có quyền đọc package. Khi Docker hỏi password, nhập **GitHub personal access token (classic)** có quyền `read:packages`, không phải mật khẩu GitHub:
+
+```sh
+docker login ghcr.io -u tranvanha-tyranno
+docker compose pull backend
+docker compose up -d --no-build backend
+docker compose ps
+docker compose exec backend python -m backend.access
+```
+
+Mỗi lần cập nhật image chỉ chạy lại hai lệnh `pull` và `up -d --no-build`; cấu hình và dữ liệu vẫn ở volume. Có thể thay `latest` bằng tag `sha-COMMIT_SHA` để chọn một bản cụ thể. Server không cần build image hoặc cài Python/FFmpeg riêng.
+
+Build trên máy local bằng `docker compose build backend`, sau đó chạy `docker compose up -d --no-build`. Nếu `.env` local chưa có `SPEAKER_IMAGE`, Compose dùng `dsoft-audiotts-backend:local` như trước.
+
 ## Đăng nhập dashboard
 
 Backend tự tạo khóa operator/device riêng trong volume ở lần khởi động đầu tiên. Trên Windows có thể mở ngay trang đã đăng nhập:
@@ -85,3 +118,5 @@ Code frontend thay đổi cần build lại image bằng `docker compose up -d -
 | `scripts/docker-open.ps1` | Mở web Docker trên trình duyệt Windows |
 
 Tham khảo: [Docker build best practices](https://docs.docker.com/build/building/best-practices/), [Compose readiness/healthcheck](https://docs.docker.com/compose/how-tos/startup-order/).
+
+Registry và token: [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry). Tùy chọn chạy image có sẵn: [docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/).

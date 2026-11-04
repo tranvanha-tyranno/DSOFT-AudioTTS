@@ -21,6 +21,8 @@ Trên PowerShell dùng `Copy-Item .env.example .env`. Lệnh `backend.access` in
 
 Docker gồm dashboard, API và FFmpeg; named volume giữ cấu hình TTS, token, hàng đợi và cache khi restart. Xem [hướng dẫn Docker](docs/DOCKER.md) để cấu hình IP/cổng và vận hành. Firmware ESP32-S3 vẫn build trên máy phát triển bằng ESP-IDF.
 
+**Server chỉ pull rồi chạy:** đặt `SPEAKER_IMAGE=ghcr.io/tranvanha-tyranno/dsoft-audiotts-backend:latest` trong `.env`, đăng nhập `docker login ghcr.io`, sau đó chạy `docker compose pull backend` và `docker compose up -d --no-build backend`. Image private cho Linux amd64 được workflow **Publish backend image** build/push từ nhánh `main`. Chi tiết token và cấu hình server nằm trong [DOCKER.md](docs/DOCKER.md#server-chỉ-pull-image-đã-build).
+
 ## Mở dashboard web demo
 
 Chạy từ `AudioWifiTTS`:

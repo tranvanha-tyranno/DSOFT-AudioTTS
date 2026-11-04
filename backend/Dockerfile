@@ -25,6 +25,10 @@ USER speaker
 EXPOSE 8088
 VOLUME ["/app/backend/data"]
 
+LABEL org.opencontainers.image.source="https://github.com/tranvanha-tyranno/DSOFT-AudioTTS" \
+      org.opencontainers.image.title="DSOFT AudioTTS backend" \
+      org.opencontainers.image.description="Web dashboard and TTS backend for the ESP32-S3 speaker"
+
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=2)"
 
