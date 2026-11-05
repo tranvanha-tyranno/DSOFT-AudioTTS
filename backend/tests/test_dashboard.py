@@ -151,3 +151,74 @@ def test_dashboard_session_new_tab_and_logout(client):
     assert client.get("/v1/dashboard/overview", headers={"Authorization": "Bearer wrong-key"}).status_code == 401
     assert client.delete("/v1/dashboard/session").status_code == 200
     assert client.get("/v1/dashboard/overview").status_code == 401
+
+
+@pytest.mark.parametrize("status,error,expected", [
+    (401, {"code": "invalid_api_key"}, "Khóa API TTS không hợp lệ"),
+    (403, {}, "từ chối quyền truy cập"),
+    (429, {"code": "insufficient_quota"}, "hết số dư"),
+    (429, {"type": "insufficient_quota"}, "hết số dư"),
+    (429, {"code": "project_spend_limit_exceeded"}, "hết số dư"),
+    (429, {"code": "rate_limit_exceeded"}, "giới hạn yêu cầu"),
+    (400, {"param": "voice"}, "Trường cần kiểm tra: voice"),
+    (404, {"code": "model_not_found"}, "Không tìm thấy"),
+    (503, {}, "proxy phía nhà cung cấp đang lỗi"),
+])
+def test_provider_errors_visible_without_secrets(client, monkeypatch, caplog, status, error, expected):
+    original_client = httpx.Client
+
+    def respond(request):
+        return httpx.Response(status, json={"error": {**error, "message": "sk-private-key secret text"}})
+
+    client.put("/v1/dashboard/tts", headers=OP, json={
+        "provider": "http", "tts_url": "https://api.openai.com/v1/audio/speech",
+        "api_key": "sk-private-key", "voice": "alloy", "model": "gpt-4o-mini-tts",
+        "body_template": {"input": "{{text}}", "voice": "{{voice}}", "model": "{{model}}", "response_format": "pcm"},
+    })
+    monkeypatch.setattr(tts.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs))
+    response = client.post("/v1/dashboard/preview", headers=OP, json={"text": "secret text"})
+    assert response.status_code == 502
+    assert expected in response.json()["detail"]
+    assert f"API HTTP {status}" in response.json()["detail"]
+    assert f"upstream_status={status}" in caplog.text
+    assert "sk-private-key" not in response.text + caplog.text
+    assert "secret text" not in response.text + caplog.text
+    # A provider's 401 must not log the dashboard operator out.
+    assert client.get("/v1/dashboard/overview", headers=OP).status_code == 200
+
+
+@pytest.mark.parametrize("body", [
+    b"<html>private-key secret text</html>",
+    b'{"error": "private-key secret text"}',
+    b'{"error": {"code": ["private-key"], "type": {}, "param": []}}',
+    b'{"error": {"code": "private-key", "message": "secret text"}}',
+    b"private-key" * 5000,
+], ids=["html", "string-error", "non-string-fields", "unknown-code", "oversized"])
+def test_malformed_provider_error_is_safe(monkeypatch, caplog, body):
+    original_client = httpx.Client
+    monkeypatch.setattr(tts.httpx, "Client", lambda **kwargs: original_client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(400, content=body)), **kwargs))
+    with pytest.raises(tts.HTTPException) as failure:
+        tts.synthesize("secret text", {"provider": "http", "tts_url": "https://tts.example.test/speech",
+            "tts_key": "private-key", "voice": "alloy", "format": "pcm"})
+    assert failure.value.status_code == 502
+    assert "code=unknown" in failure.value.detail
+    assert "private-key" not in failure.value.detail + caplog.text
+    assert "secret text" not in failure.value.detail + caplog.text
+
+
+def test_provider_timeout_is_logged_without_url_or_key(monkeypatch, caplog):
+    original_client = httpx.Client
+
+    def timeout(request):
+        raise httpx.ReadTimeout("secret text private-key https://tts.example.test?token=private-key")
+
+    monkeypatch.setattr(tts.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(timeout), **kwargs))
+    with pytest.raises(tts.HTTPException) as failure:
+        tts.synthesize("secret text", {"provider": "http", "tts_url": "https://tts.example.test/speech",
+            "tts_key": "private-key", "voice": "alloy", "format": "pcm"})
+    assert failure.value.status_code == 502
+    assert "phản hồi quá chậm" in failure.value.detail
+    assert "timed out" in caplog.text
+    assert "private-key" not in failure.value.detail + caplog.text
+    assert "secret text" not in failure.value.detail + caplog.text

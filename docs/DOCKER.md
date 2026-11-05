@@ -95,6 +95,26 @@ Docker volume và dữ liệu chạy Python local (`backend/data`) tách biệt.
 
 ## Vận hành
 
+### Khi phát thử báo HTTP 502
+
+Backend khởi động thành công chưa chứng minh API TTS hoạt động. Bấm Phát thử rồi xem:
+
+```sh
+docker compose logs --since=5m --timestamps backend
+```
+
+Bản mới ghi `TTS provider rejected request: upstream_status=... code=...` và hiển thị
+hướng xử lý ngay trên dashboard. `401` thường liên quan khóa; `400/422` là cấu hình
+model/voice/JSON; `429` cần phân biệt hết số dư/hạn mức với giới hạn tốc độ. Không
+ghi khóa, nội dung văn bản hoặc nguyên body lỗi từ nhà cung cấp vào log.
+
+Nếu web báo 502 nhưng backend không ghi lỗi mới, kiểm tra reverse proxy và truy cập
+trực tiếp cổng public trong `.env` (ví dụ `http://IP_THAT_CUA_SERVER:8090/`).
+`SPEAKER_PUBLIC_URL` phải chứa IP/domain thật, không để nguyên chữ `IP_SERVER`.
+Biến này dùng cho ESP32 tải âm thanh; nó không quyết định URL gọi API OpenAI.
+
+Sau khi cập nhật image, làm mới trang bằng Ctrl+F5 trước khi thử lại.
+
 ```sh
 docker compose logs --tail=100 -f backend
 docker compose restart backend

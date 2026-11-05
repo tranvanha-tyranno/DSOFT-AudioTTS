@@ -92,7 +92,7 @@ async function api(
     try {
       detail = (await response.json()).detail;
     } catch (_) {
-      detail = `Backend trả lỗi HTTP ${response.status}`;
+      detail = `Backend hoặc proxy trả lỗi HTTP ${response.status}. Xem log backend; nếu không có lỗi mới, kiểm tra proxy và thử truy cập trực tiếp cổng dashboard.`;
     }
     if (response.status === 401 && state.authenticated) lockDashboard();
     throw new Error(explainError(detail));

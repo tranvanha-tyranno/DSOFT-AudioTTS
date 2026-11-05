@@ -6,6 +6,8 @@ provider trống: chưa cấu hình. tone: tiếng beep thử loa. http: adapter
 from __future__ import annotations
 
 import io
+import json
+import logging
 import math
 import re
 from pathlib import Path
@@ -21,6 +23,56 @@ import httpx
 
 RATE = 24000
 MAX_AUDIO = RATE * 2 * 60
+logger = logging.getLogger("uvicorn.error")
+
+
+def provider_failure(response: httpx.Response) -> HTTPException:
+    """Chỉ đọc mã lỗi đã biết; không ghi body có thể chứa khóa hoặc văn bản."""
+    body = bytearray()
+    for chunk in response.iter_bytes(chunk_size=4096):
+        body.extend(chunk)
+        if len(body) > 16384:
+            break
+    try:
+        data = json.loads(body)
+        error = data.get("error", {}) if isinstance(data, dict) else {}
+        if not isinstance(error, dict):
+            error = {}
+    except (ValueError, UnicodeError):
+        error = {}
+    known_codes = {
+        "invalid_api_key", "insufficient_quota", "credit_balance_exhausted",
+        "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
+        "organization_usage_limit_exceeded", "rate_limit_exceeded", "slow_down",
+        "model_not_found", "invalid_request_error", "unsupported_country_region_territory",
+    }
+    code = next((value for value in (error.get("code"), error.get("type"))
+                 if isinstance(value, str) and value in known_codes), "unknown")
+    status = response.status_code
+    if status == 401:
+        message = "Khóa API TTS không hợp lệ hoặc đã bị thu hồi. Nhập lại khóa của nhà cung cấp."
+    elif status == 403:
+        message = "API TTS từ chối quyền truy cập. Kiểm tra quyền của khóa, model và giới hạn IP/khu vực."
+    elif status == 429 and code in {
+        "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded", "organization_usage_limit_exceeded",
+    }:
+        message = "Tài khoản API TTS hết số dư hoặc chạm hạn mức sử dụng. Kiểm tra Billing và Limits của nhà cung cấp."
+    elif status == 429:
+        message = "API TTS đang giới hạn yêu cầu. Đợi một lúc rồi thử lại; kiểm tra Limits nếu lỗi tiếp tục."
+    elif status == 404 or code == "model_not_found":
+        message = "Không tìm thấy URL API TTS hoặc model, hoặc khóa chưa có quyền dùng model đó."
+    elif status in {400, 422}:
+        message = "API TTS không chấp nhận cấu hình. Kiểm tra model, voice và JSON request."
+        param = error.get("param")
+        if isinstance(param, str) and param in {"model", "input", "voice", "response_format", "speed", "instructions"}:
+            message += f" Trường cần kiểm tra: {param}."
+    elif status >= 500:
+        message = "Dịch vụ TTS hoặc proxy phía nhà cung cấp đang lỗi. Thử lại sau."
+    else:
+        message = "API TTS từ chối yêu cầu. Kiểm tra URL, khóa và JSON request."
+    logger.warning("TTS provider rejected request: upstream_status=%s code=%s", status, code)
+    return HTTPException(502, f"{message} (API HTTP {status}; code={code})")
 
 
 def normalize_audio(data: bytes, fmt: str) -> bytes:
@@ -105,8 +157,9 @@ def synthesize(text: str, settings: dict) -> bytes:
         with httpx.Client(timeout=40, follow_redirects=False) as client:
             with client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
-                    raise HTTPException(502, "TTS provider rejected request")
+                    raise provider_failure(response)
                 if "json" in response.headers.get("content-type", "").lower():
+                    logger.warning("TTS provider returned JSON instead of binary audio")
                     raise HTTPException(502, "This adapter expects binary audio, not a JSON audio URL")
                 chunks, size = [], 0
                 for chunk in response.iter_bytes():
@@ -114,6 +167,10 @@ def synthesize(text: str, settings: dict) -> bytes:
                     if size > 12 * 1024 * 1024:
                         raise HTTPException(502, "TTS response too large")
                     chunks.append(chunk)
-    except httpx.HTTPError:
+    except httpx.TimeoutException:
+        logger.warning("TTS connection timed out after 40 seconds")
+        raise HTTPException(502, "API TTS phản hồi quá chậm. Kiểm tra kết nối mạng của server và thử lại.") from None
+    except httpx.HTTPError as error:
+        logger.warning("TTS connection failed: error_type=%s", type(error).__name__)
         raise HTTPException(502, "TTS connection failed")
     return normalize_audio(b"".join(chunks), settings["format"])
