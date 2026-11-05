@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from .tts import RATE
+from .config import MAX_TEXT_LENGTH
 
 
 class TTSUpdate(BaseModel):
@@ -64,7 +65,63 @@ class DeviceUpdate(BaseModel):
 
 
 class PreviewRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=1000)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+
+
+class SessionResult(BaseModel):
+    connected: bool
+
+
+class TTSSettingsResult(BaseModel):
+    provider: str
+    tts_url: str
+    voice: str
+    format: str
+    revision: str
+    model: str
+    auth_header: str
+    auth_prefix: str
+    body_template: dict
+    has_api_key: bool
+
+
+class DevicePresence(BaseModel):
+    id: str
+    configured: bool
+    online: bool
+    last_seen: float | None
+
+
+class HistoryJob(BaseModel):
+    id: str
+    device: str
+    text: str
+    status: str
+    volume: int
+    priority: int
+    created: float
+    updated: float | None
+    audio_kind: str
+
+
+class OverviewResult(BaseModel):
+    devices: list[DevicePresence]
+    jobs: list[HistoryJob]
+    totals: dict[str, int]
+    provider: str
+    server_time: float
+
+
+class DeviceRegistrationResult(BaseModel):
+    device_id: str
+    configured: bool
+
+
+class DeviceConnectionResult(BaseModel):
+    device_id: str
+    device_token: str
+    backend_url: str
+    allow_http: bool
 
 
 def register_dashboard(app, *, operator_auth, connect, lock, settings, device_keys, cached_audio):
@@ -107,7 +164,7 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
     def dashboard():
         return FileResponse(static / "index.html", headers={"Cache-Control": "no-store"})
 
-    @app.post("/v1/dashboard/session", dependencies=[Depends(operator_auth)])
+    @app.post("/v1/dashboard/session", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Đăng nhập dashboard", response_model=SessionResult)
     def start_session(request: Request, response: Response):
         # Session cookie giúp mở tab mới mà không phải nhập lại khóa operator.
         header = request.headers.get("authorization", "")
@@ -117,17 +174,17 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
         response.headers["Cache-Control"] = "no-store"
         return {"connected": True}
 
-    @app.delete("/v1/dashboard/session", dependencies=[Depends(operator_auth)])
+    @app.delete("/v1/dashboard/session", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Đăng xuất dashboard", response_model=SessionResult)
     def end_session(response: Response):
         response.delete_cookie("dsoft_dashboard", path="/", samesite="strict", httponly=True)
         return {"connected": False}
 
-    @app.get("/v1/dashboard/tts", dependencies=[Depends(operator_auth)])
+    @app.get("/v1/dashboard/tts", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Xem cấu hình TTS", response_model=TTSSettingsResult)
     def get_tts_settings():
         with lock:
             return public_settings()
 
-    @app.put("/v1/dashboard/tts", dependencies=[Depends(operator_auth)])
+    @app.put("/v1/dashboard/tts", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Lưu cấu hình TTS", response_model=TTSSettingsResult)
     def save_tts_settings(request: TTSUpdate):
         with lock, connect() as con:
             values = request.model_dump(exclude={"api_key", "clear_api_key"})
@@ -139,7 +196,8 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
             settings.update(values)
             return public_settings()
 
-    @app.post("/v1/dashboard/preview", dependencies=[Depends(operator_auth)])
+    @app.post("/v1/dashboard/preview", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Nghe thử WAV trên trình duyệt", response_class=Response,
+              responses={200: {"content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}}}})
     def preview(request: PreviewRequest):
         if not request.text.strip():
             raise HTTPException(422, "Vui lòng nhập văn bản để nghe thử")
@@ -153,7 +211,7 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
             audio.writeframes(pcm)
         return Response(output.getvalue(), media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
-    @app.get("/v1/dashboard/overview", dependencies=[Depends(operator_auth)])
+    @app.get("/v1/dashboard/overview", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Xem loa và lịch sử phát", response_model=OverviewResult)
     def overview():
         with lock, connect() as con:
             now = time.time()
@@ -169,7 +227,7 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
             return {"devices": devices, "jobs": jobs, "totals": totals,
                     "provider": settings["provider"], "server_time": now}
 
-    @app.put("/v1/dashboard/devices", dependencies=[Depends(operator_auth)])
+    @app.put("/v1/dashboard/devices", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Đăng ký hoặc cập nhật loa", response_model=DeviceRegistrationResult)
     def save_device(request: DeviceUpdate):
         with lock, connect() as con:
             token = request.token or device_keys.get(request.device_id) or secrets.token_urlsafe(24)
@@ -178,7 +236,7 @@ def register_dashboard(app, *, operator_auth, connect, lock, settings, device_ke
             device_keys.update(updated)
             return {"device_id": request.device_id, "configured": True}
 
-    @app.get("/v1/dashboard/devices/{device_id}/connection", dependencies=[Depends(operator_auth)])
+    @app.get("/v1/dashboard/devices/{device_id}/connection", dependencies=[Depends(operator_auth)], tags=["Dashboard"], summary="Lấy URL và token cho firmware", response_model=DeviceConnectionResult)
     def device_connection(device_id: str, request: Request):
         if device_id not in device_keys:
             raise HTTPException(404, "Không tìm thấy loa")

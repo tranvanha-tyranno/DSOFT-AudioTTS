@@ -53,7 +53,26 @@ Baseline đang dùng 4 MB flash và PSRAM tắt. Chưa biết mã module cụ th
 .\scripts\build.ps1 -Action monitor -Port COM5
 ```
 
-Thay `COM5` bằng cổng thực của ESP32-S3. Không nạp file BIN cũ của ESP32 thường. Build mới tạo `build/dsoft_wifi_speaker.bin`; lệnh flash của ESP-IDF tự nạp bootloader, partition và application đúng offset cho S3.
+Thay `COM5` bằng cổng thực của ESP32-S3. Không nạp file BIN cũ của ESP32 thường. Build mới tạo `build/dsoft_wifi_speaker.bin`; script lấy offset từ `build/flash_args` do ESP-IDF sinh để nạp bootloader, partition và application đúng vị trí cho S3.
+
+Script mặc định tự đưa board vào chế độ nạp qua DTR/RTS (`default_reset`), nạp ở
+115200 baud rồi tự reset chạy firmware (`hard_reset`). Không cần thêm cờ BOOT
+thủ công. Có thể chạy task VS Code **P01: Tu nap ESP32-S3 (auto reset)** và nhập
+cổng COM, hoặc dùng lệnh:
+
+```powershell
+.\scripts\build.ps1 -Action flash -Port COM7
+```
+
+Với cổng USB Serial/JTAG native của S3, có thể chọn `-ResetMode usb_reset` và
+cổng COM tương ứng. CH340/CP210x dùng `default_reset`. Tham số `-Baud` cho phép
+chọn tốc độ ghi khác khi cần.
+
+Auto-reset cần mạch USB-UART điều khiển đúng GPIO0/EN qua DTR/RTS. Nếu vẫn báo
+`No serial data received`, phần mềm đã yêu cầu tự reset nhưng chưa nhận được
+phản hồi từ chip; cần kiểm tra cổng, nguồn, đường UART và mạch auto-reset trên
+board. Không thể bổ sung đường dây phần cứng bị thiếu bằng cấu hình firmware.
+Xem [Automatic Bootloader của Espressif](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/advanced-topics/boot-mode-selection.html#automatic-bootloader).
 
 Console UART0 được bật, cùng đầu ra phụ USB Serial/JTAG. Có thể dùng cổng USB-UART của board hoặc cổng USB native tương ứng để xem log. Nếu cổng native chưa xuất hiện hoặc không tự vào chế độ nạp, giữ BOOT, nhấn/thả RESET rồi thả BOOT và thử lại. Cáp cần truyền được dữ liệu.
 

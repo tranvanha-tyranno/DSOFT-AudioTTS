@@ -20,9 +20,10 @@ import wave
 
 from fastapi import HTTPException
 import httpx
+from .config import MAX_AUDIO_BYTES, SAMPLE_RATE_HZ
 
-RATE = 24000
-MAX_AUDIO = RATE * 2 * 60
+RATE = SAMPLE_RATE_HZ
+MAX_AUDIO = MAX_AUDIO_BYTES
 logger = logging.getLogger("uvicorn.error")
 
 

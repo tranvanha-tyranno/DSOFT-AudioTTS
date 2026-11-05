@@ -1,5 +1,8 @@
 # Dashboard web demo — DSOFT Voice Lab
 
+Tài liệu API thống nhất: [API.md](API.md). Trang `/docs` dành cho tích hợp theo
+user_id; `/docs/internal` dành cho cấu hình dashboard và giao tiếp ESP32.
+
 ## Chạy nhanh
 
 Tại thư mục `AudioWifiTTS`:
@@ -52,20 +55,50 @@ Nhấn **Lưu cấu hình**. Cấu hình nằm trong SQLite và còn sau khi res
 
 Chọn **Âm mẫu** để kiểm tra web/backend/loa mà chưa gọi nhà cung cấp. Đó là beep 440 Hz một giây, không đọc câu bạn nhập. API thật vẫn để trống trong bản bàn giao.
 
-## 2. Nghe thử và gửi tới ESP32
+## 2. Đăng ký người dùng và phát theo ID
 
-Nhập nội dung ở **Phát thử**:
+Mở **Người dùng**, đăng ký `user_id`, tên hiển thị, lời chào và loa nhận lệnh.
+Đăng ký dùng `POST /v1/users`; chỉnh sửa dùng `PUT /v1/users/{user_id}` với
+body gồm `name`, `text_to_speech`, `device_id`. Lưu dữ liệu không tự phát loa.
 
-- **Nghe thử trên web:** backend tạo/cache audio, bọc thành WAV để trình duyệt phát. Không tạo job cho ESP32.
-- **Phát trên ESP32:** tạo job với device ID, nội dung, volume và mức ưu tiên. Bảng lịch sử theo dõi queued → playing → played/failed.
+Mở **Phát theo ID**, chọn người dùng đã đăng ký. Trang hiển thị đúng lời chào và
+loa từ database, không có ô ghi đè nội dung hay đổi loa khi gọi phát.
 
-“Đang xử lý” bao gồm thời gian ESP32 nhận job, tải audio và phát. “Đã phát” chỉ hiển thị khi firmware gửi ACK. Nếu chưa có loa gọi về backend thì hiển thị “Chưa kết nối”, job tiếp tục chờ. Không giả lập thiết bị trong bản demo thật.
+- **Nghe thử trên web:** dùng lời chào của người dùng đang chọn, backend tạo/cache
+  audio và bọc thành WAV. Không tạo job cho ESP32. Trình duyệt bỏ Blob URL khi nghe
+  xong, đóng nghe thử, đổi người dùng, rời trang phát hoặc đăng xuất.
+- **Phát trên loa:** gọi `POST /v1/detect` với body chỉ có `{"user_id":1}`. Backend
+  lấy nội dung và loa từ database. Mỗi lần bấm tạo một lượt phát.
+- Khung **Gọi từ ứng dụng của bạn** hiển thị URL hiện tại, JSON và lệnh cURL để sao
+  chép. Lệnh dùng `YOUR_ADMIN_KEY` làm chỗ điền khóa, không chèn khóa thật vào mã mẫu.
 
-Trang cập nhật khoảng ba giây/lần; thiết bị được coi còn kết nối nếu đã gọi `/next` trong 15 giây gần nhất. Ưu tiên cao đi trước các câu chưa bắt đầu, không ngắt câu đang phát. Giới hạn hiện có: tối đa 20 job chờ/đang xử lý mỗi loa, 20 yêu cầu mới/phút/loa, 60 giây audio/câu.
+Lịch sử theo dõi queued → playing → played/failed. “Loa đang xử lý” bao gồm tải và
+phát. “Loa báo hoàn tất” chỉ xác nhận firmware gửi ACK sau khi ghi xong I2S, không
+đo được âm thanh thực tế tại loa. Nếu loa offline, yêu cầu vẫn xếp hàng chờ kết nối.
+
+Trang cập nhật trạng thái khoảng ba giây/lần, danh sách người dùng khoảng chín
+giây/lần; thiết bị online nếu gọi `/next` trong 15 giây gần nhất. Mỗi lượt tối đa
+1.000 ký tự và 60 giây audio; tối đa 20 job chờ/đang xử lý và 20 yêu cầu mới/phút/loa.
+
+ESP32 tải PCM theo từng phần và phát song song. Bộ đệm 32 KiB chỉ được cấp khi có
+job, giải phóng sau khi tác vụ tải và I2S đều dừng, kể cả khi gặp lỗi. Nếu tác vụ
+I2S chưa dừng sau timeout, firmware giữ bộ đệm đó để tránh truy cập bộ nhớ đã giải
+phóng; chỉ thu hồi khi tác vụ đã kết thúc. Monitor báo `Audio RAM allocated` và
+`Audio RAM released: buffer=0 bytes`. ESP32 không ghi file WAV/PCM vào flash/SD.
+Cache audio ở backend vẫn giữ để dùng lại; người dùng, khóa, cấu hình và lịch sử
+không thay đổi bởi cơ chế giải phóng RAM.
 
 ## 3. Kết nối firmware
 
-Trong **Kết nối ESP32**, chọn hoặc đăng ký `speaker-01`. Nếu không nhập token cho thiết bị mới, backend tạo token. Với thiết bị đã có, để trống giữ token cũ. Bấm **Sao chép code cấu hình C++** và thay các dòng server tương ứng trong `main/speaker_config.h`, bên trong `namespace speaker_config`.
+Trong **Thiết bị**, đăng ký `speaker-01` hoặc chọn loa đang có ở phần **Cấu hình
+firmware**. Để trống token để tạo token cho loa mới hoặc giữ token của loa đã có.
+Bấm **Xem cấu hình kết nối**, rồi **Sao chép cấu hình** và thay các dòng tương ứng
+trong `main/speaker_config.local.h`. File này được include bên trong namespace
+`speaker_config`, không thêm namespace lần nữa. Token được ẩn
+khi rời trang Thiết bị hoặc bấm **Ẩn token**.
+
+Phần **Mã loa từ hệ thống ngoài** dùng API `/v1/device-aliases`. Ví dụ mã `0001`
+trỏ tới `speaker-01`, giúp đăng ký người dùng bằng mã ngoài mà không nạp lại board.
 
 ```cpp
 inline constexpr const char *wifi_ssid = "TEN_WIFI";

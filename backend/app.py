@@ -9,6 +9,7 @@ import hashlib
 from contextlib import contextmanager
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -24,15 +25,26 @@ from pydantic import BaseModel, Field
 
 from .tts import RATE, synthesize
 from .dashboard import register_dashboard
+from .detection import register_detection
+from .api_docs import configure_api_docs
+from .config import DEVICE_ID_PATTERN, MAX_TEXT_LENGTH
 
-ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
-bearer = HTTPBearer(auto_error=False)
+ID_PATTERN = DEVICE_ID_PATTERN
+admin_bearer = HTTPBearer(auto_error=False, scheme_name="AdminKey",
+                          description="Khóa quản trị backend, lấy từ backend.access. Nhập nguyên khóa; Swagger tự thêm Bearer.")
+device_bearer = HTTPBearer(auto_error=False, scheme_name="DeviceToken",
+                           description="Token của đúng loa trong speaker_config.h.")
+logger = logging.getLogger("uvicorn.error")
+
+
+def device_client_kind(request: Request) -> str:
+    return "esp32" if request.headers.get("user-agent", "").startswith("ESP32") else "other"
 
 
 class SpeakRequest(BaseModel):
     """Ứng dụng gửi văn bản này cho backend để tạo một lượt phát."""
     device_id: str = Field(pattern=ID_PATTERN)
-    text: str = Field(min_length=1, max_length=1000)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
     volume: int = Field(default=70, ge=0, le=100)
     priority: int = Field(default=0, ge=0, le=10)
 
@@ -42,6 +54,42 @@ class AckRequest(BaseModel):
     id: str = Field(pattern=ID_PATTERN)
     lease: str = Field(pattern=ID_PATTERN)
     status: Literal["played", "failed"]
+
+
+class QueueResult(BaseModel):
+    id: str
+    status: Literal["queued", "playing", "played", "failed"]
+    duplicate: bool
+    audio_kind: str | None = None
+
+
+class DeviceJob(BaseModel):
+    id: str
+    lease: str
+    volume: int
+    sample_rate: int
+    audio_bytes: int
+    lease_seconds: int
+
+
+class AckResult(BaseModel):
+    id: str
+    status: Literal["played", "failed"]
+
+
+class JobStatus(BaseModel):
+    id: str
+    device: str
+    status: Literal["queued", "playing", "played", "failed"]
+    volume: int
+    priority: int
+    created: float
+    updated: float | None
+
+
+class HealthStatus(BaseModel):
+    status: Literal["ok"]
+    tts_provider: str
 
 
 def create_app(data_dir: Path | None = None, api_key: str | None = None,
@@ -85,9 +133,9 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
                 lease TEXT, expires REAL, updated REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS queue ON jobs(device,status,priority DESC,seq);
         """)
-    app = FastAPI(title="DSOFT P01 WiFi Speaker", version="0.1.0",
-                  description="Text → TTS/cache → durable queue → ESP-IDF/I2S speaker")
-    app.state.public_url = os.getenv("SPEAKER_PUBLIC_URL", "")
+    app = FastAPI(title="DSOFT Audio — API tích hợp", version="0.2.0", redoc_url=None,
+                  swagger_ui_parameters={"defaultModelsExpandDepth": -1, "docExpansion": "list"})
+    app.state.public_url = os.getenv("SPEAKER_PUBLIC_URL", "").strip().rstrip("/")
 
     # 3. XÁC THỰC: ứng dụng dùng khóa operator; mỗi loa dùng khóa device riêng.
     def credential(auth: HTTPAuthorizationCredentials | None) -> str:
@@ -95,7 +143,7 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
             raise HTTPException(401, "Bearer token required", headers={"WWW-Authenticate": "Bearer"})
         return auth.credentials
 
-    def operator(request: Request, auth: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    def operator(request: Request, auth: HTTPAuthorizationCredentials | None = Depends(admin_bearer)):
         if len(operator_key) < 16:
             raise HTTPException(503, "Configure SPEAKER_API_KEY (minimum 16 characters)")
         supplied = credential(auth) if auth else request.cookies.get("dsoft_dashboard", "")
@@ -104,7 +152,7 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
         if not hmac.compare_digest(supplied, operator_key):
             raise HTTPException(401, "Invalid operator token")
 
-    def device_auth(device_id: str, auth: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    def device_auth(device_id: str, auth: HTTPAuthorizationCredentials | None = Depends(device_bearer)):
         key = device_keys.get(device_id, "")
         supplied = credential(auth)
         if len(key) < 16 or not hmac.compare_digest(supplied, key):
@@ -132,13 +180,11 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
         return audio
 
     # 4. API: các đường dẫn bên dưới tương ứng các bước trong app_main.cpp.
-    @app.get("/health")
+    @app.get("/health", tags=["Trạng thái"], summary="Kiểm tra backend", response_model=HealthStatus)
     def health():
         return {"status": "ok", "tts_provider": settings["provider"] or "unconfigured"}
 
-    @app.post("/v1/speak", status_code=202, dependencies=[Depends(operator)])
-    def speak(request: SpeakRequest, response: Response,
-              idempotency_key: str = Header(min_length=1, max_length=128)):
+    def enqueue_speech(request: SpeakRequest, response: Response, idempotency_key: str):
         """Ứng dụng: văn bản → TTS/cache → xếp hàng. Chưa có nghĩa là loa đã phát."""
         if request.device_id not in device_keys:
             raise HTTPException(404, "Unknown device")
@@ -176,8 +222,17 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
             return {"id": job_id, "status": "queued", "duplicate": False,
                     "audio_kind": "test_tone" if settings["provider"] == "tone" else "speech"}
 
-    @app.get("/v1/devices/{device_id}/next", dependencies=[Depends(device_auth)])
-    def next_job(device_id: str):
+    @app.post("/v1/speak", status_code=202, dependencies=[Depends(operator)],
+              tags=["Dashboard"], summary="Gửi văn bản trực tiếp tới loa",
+              response_model=QueueResult, response_model_exclude_none=True)
+    def speak(request: SpeakRequest, response: Response,
+              idempotency_key: str = Header(min_length=1, max_length=128)):
+        return enqueue_speech(request, response, idempotency_key)
+
+    @app.get("/v1/devices/{device_id}/next", dependencies=[Depends(device_auth)],
+             tags=["ESP32"], summary="Loa nhận lượt phát tiếp theo", response_model=DeviceJob,
+             responses={204: {"description": "Chưa có lượt phát mới"}})
+    def next_job(device_id: str, request: Request):
         """ESP32: nhận một câu và mã lease. 204 nghĩa là hiện chưa có câu mới."""
         with lock, connect() as con:
             now = time.time()
@@ -195,11 +250,15 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
             lease = secrets.token_hex(16)
             con.execute("UPDATE jobs SET status='playing',lease=?,expires=?,updated=? WHERE id=?",
                         (lease, now + 180, now, job["id"]))
+            logger.info("Job claimed: device=%s job=%s bytes=%s client=%s",
+                        device_id, job["id"], job["audio_bytes"], device_client_kind(request))
             return {"id": job["id"], "lease": lease, "volume": job["volume"],
                     "sample_rate": RATE, "audio_bytes": job["audio_bytes"], "lease_seconds": 180}
 
-    @app.get("/v1/devices/{device_id}/audio/{job_id}", dependencies=[Depends(device_auth)])
-    def audio_file(device_id: str, job_id: str, lease: str):
+    @app.get("/v1/devices/{device_id}/audio/{job_id}", dependencies=[Depends(device_auth)],
+             tags=["ESP32"], summary="Loa tải PCM của lượt phát", response_class=FileResponse,
+             responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
+    def audio_file(device_id: str, job_id: str, lease: str, request: Request):
         """ESP32: tải PCM của câu đã được cấp quyền xử lý."""
         with lock, connect() as con:
             job = con.execute("SELECT * FROM jobs WHERE id=? AND device=?", (job_id, device_id)).fetchone()
@@ -210,11 +269,14 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
             path = cache / job["audio"]
             if not path.exists():
                 raise HTTPException(410, "Audio cache missing")
+            logger.info("Audio requested: device=%s job=%s bytes=%s client=%s",
+                        device_id, job_id, job["audio_bytes"], device_client_kind(request))
             return FileResponse(path, media_type="application/octet-stream",
                                 headers={"Cache-Control": "no-store"})
 
-    @app.post("/v1/devices/{device_id}/ack", dependencies=[Depends(device_auth)])
-    def ack(device_id: str, request: AckRequest):
+    @app.post("/v1/devices/{device_id}/ack", dependencies=[Depends(device_auth)],
+              tags=["ESP32"], summary="Loa gửi kết quả xuất I2S", response_model=AckResult)
+    def ack(device_id: str, request: AckRequest, http_request: Request):
         """ESP32: xác nhận đã phát hoặc thất bại, không tạo lượt phát mới."""
         with lock, connect() as con:
             job = con.execute("SELECT * FROM jobs WHERE id=? AND device=?", (request.id, device_id)).fetchone()
@@ -228,9 +290,13 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
                 raise HTTPException(409, "Job already completed or lease expired")
             con.execute("UPDATE jobs SET status=?,updated=? WHERE id=?",
                         (request.status, time.time(), request.id))
+            logger.info("Playback ACK accepted: device=%s job=%s result=%s client=%s",
+                        device_id, request.id, request.status, device_client_kind(http_request))
             return {"id": request.id, "status": request.status}
 
-    @app.get("/v1/jobs/{job_id}", dependencies=[Depends(operator)])
+    @app.get("/v1/jobs/{job_id}", dependencies=[Depends(operator)],
+             tags=["Trạng thái"], summary="Xem trạng thái một lượt phát", response_model=JobStatus,
+             description="queued: chờ loa; playing: đã giao cho loa; played: firmware báo xuất I2S xong; failed: lỗi hoặc hết thời gian chờ ACK.")
     def status(job_id: str):
         """Ứng dụng: xem queued / playing / played / failed."""
         with lock, connect() as con:
@@ -244,6 +310,9 @@ def create_app(data_dir: Path | None = None, api_key: str | None = None,
 
     register_dashboard(app, operator_auth=operator, connect=connect, lock=lock,
                        settings=settings, device_keys=device_keys, cached_audio=cached_audio)
+    register_detection(app, operator_auth=operator, connect=connect, lock=lock, device_keys=device_keys,
+                       enqueue_speech=lambda payload, response, key: enqueue_speech(SpeakRequest(**payload), response, key))
+    configure_api_docs(app)
     return app
 
 

@@ -2,7 +2,11 @@
 
 Các đường dẫn và lệnh dưới đây tính từ thư mục gốc `AudioWifiTTS`. Nếu mới đọc dự án, bắt đầu với `README.md` ở thư mục gốc và `docs/DOC_CODE_TU_DAU.md`.
 
-Điểm bắt đầu để nâng cấp: **`main/app_main.cpp`**. Target: **ESP32-S3 + MAX98357A**, ESP-IDF **5.5.5**, baseline **4 MB flash**, chưa bật PSRAM. Đây là mã nền MVP; API TTS thực tế để trống theo yêu cầu.
+API tích hợp hiện tại được mô tả tại [API.md](API.md): đăng ký người dùng rồi gọi
+`POST /v1/detect` chỉ với user_id. Phần `/v1/speak` dưới đây mô tả luồng Phát thử
+nội bộ; xem `/docs/internal` cho API dashboard và firmware.
+
+Điểm bắt đầu để nâng cấp: **`main/app_main.cpp`**. Target: **ESP32-S3 + MAX98357A**, ESP-IDF **5.5.5**, baseline **4 MB flash**, chưa bật PSRAM. Dịch vụ TTS được cấu hình trên dashboard và lưu tại backend.
 
 ## Luồng hoạt động
 

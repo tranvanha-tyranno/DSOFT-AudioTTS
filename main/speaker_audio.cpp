@@ -12,6 +12,9 @@
 
 #include <cstring>
 #include "driver/i2s_std.h"
+#include "esp_log.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
@@ -28,6 +31,7 @@ static EventGroupHandle_t playback_events;
 static i2s_chan_handle_t i2s_output;
 static unsigned volume_percent;
 static bool playback_requested;
+static const char *TAG = "speaker_audio";
 
 // Giữ phép nhân ở kiểu có dấu: nửa âm của sóng cũng phải giảm đúng theo volume.
 static constexpr int16_t scale_pcm_sample(int16_t sample, unsigned volume)
@@ -51,6 +55,8 @@ static bool write_to_i2s(const void *data, std::size_t size)
         const esp_err_t result = i2s_channel_write(i2s_output, bytes + sent, size - sent,
                                                   &written, speaker_config::i2s_write_timeout_ms);
         if (result != ESP_OK || written == 0) {
+            ESP_LOGE(TAG, "I2S write failed: %s, written=%u", esp_err_to_name(result),
+                     static_cast<unsigned>(written));
             return false;
         }
         sent += written;
@@ -78,6 +84,12 @@ static bool play_buffered_audio()
     // PCM16 dùng 2 byte/mẫu. HTTP có thể chia đúng giữa hai byte của một mẫu.
     bool has_first_byte = false;
     uint8_t first_byte = 0;
+    std::size_t consumed = 0;
+    const int64_t started = esp_timer_get_time();
+    int64_t last_progress = started;
+    ESP_LOGI(TAG, "Playback start: buffer=%u/%u bytes",
+             static_cast<unsigned>(xStreamBufferBytesAvailable(pcm_buffer)),
+             static_cast<unsigned>(speaker_config::audio_buffer_bytes));
 
     while (true) {
         if (xEventGroupGetBits(playback_events) & PLAYBACK_FAILED) {
@@ -89,8 +101,12 @@ static bool play_buffered_audio()
         if (received == 0) {
             const bool download_finished = xEventGroupGetBits(playback_events) & DOWNLOAD_FINISHED;
             if (download_finished) {
+                ESP_LOGI(TAG, "Playback drained: pcm=%u bytes, elapsed=%lld ms",
+                         static_cast<unsigned>(consumed), (esp_timer_get_time() - started) / 1000);
                 return !has_first_byte;  // Một byte lẻ còn sót nghĩa là audio bị cắt giữa mẫu.
             }
+            ESP_LOGE(TAG, "Buffer underrun: pcm=%u bytes, wait=%d ms",
+                     static_cast<unsigned>(consumed), speaker_config::audio_data_wait_ms);
             return false;  // Hụt buffer quá thời gian chờ: báo lỗi thay vì báo phát thành công.
         }
 
@@ -116,6 +132,15 @@ static bool play_buffered_audio()
         if (!write_to_i2s(stereo, output_samples * sizeof(int16_t))) {
             return false;
         }
+        consumed += received;
+        const int64_t now = esp_timer_get_time();
+        if (now - last_progress >= 1000000) {
+            ESP_LOGI(TAG, "Playback progress: pcm=%u bytes, buffer=%u/%u, elapsed=%lld ms",
+                     static_cast<unsigned>(consumed),
+                     static_cast<unsigned>(xStreamBufferBytesAvailable(pcm_buffer)),
+                     static_cast<unsigned>(speaker_config::audio_buffer_bytes), (now - started) / 1000);
+            last_progress = now;
+        }
     }
 }
 
@@ -136,14 +161,14 @@ static void playback_task(void *argument)
 
         // Báo cho speaker_audio_end() rằng tác vụ phát đã xử lý xong câu này.
         xEventGroupSetBits(playback_events, PLAYBACK_FINISHED | (played ? 0 : PLAYBACK_FAILED));
+        ESP_LOGI(TAG, "Playback task finished: %s", played ? "played" : "failed");
     }
 }
 
 esp_err_t speaker_audio_init(void)
 {
-    pcm_buffer = xStreamBufferCreate(speaker_config::audio_buffer_bytes, 1);
     playback_events = xEventGroupCreate();
-    if (!pcm_buffer || !playback_events) {
+    if (!playback_events) {
         return ESP_ERR_NO_MEM;
     }
 
@@ -175,17 +200,45 @@ esp_err_t speaker_audio_init(void)
     return created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-void speaker_audio_begin(unsigned volume)
+// Only the download task releases the buffer, after both tasks have stopped using it.
+static void release_pcm_buffer()
 {
-    xStreamBufferReset(pcm_buffer);
+    if (pcm_buffer) {
+        vStreamBufferDelete(pcm_buffer);
+        pcm_buffer = nullptr;
+        ESP_LOGI(TAG, "Audio RAM released: buffer=0 bytes, heap=%u",
+                 static_cast<unsigned>(esp_get_free_heap_size()));
+    }
+}
+
+esp_err_t speaker_audio_begin(unsigned volume)
+{
+    if (pcm_buffer) {
+        if (!(xEventGroupGetBits(playback_events) & PLAYBACK_FINISHED)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        // Reap a previous playback that finished after the end() timeout.
+        release_pcm_buffer();
+    }
+    pcm_buffer = xStreamBufferCreate(speaker_config::audio_buffer_bytes, 1);
+    if (!pcm_buffer) {
+        ESP_LOGE(TAG, "Cannot allocate audio RAM");
+        return ESP_ERR_NO_MEM;
+    }
     xEventGroupClearBits(playback_events,
         PLAY_REQUESTED | DOWNLOAD_FINISHED | PLAYBACK_FINISHED | PLAYBACK_FAILED);
     volume_percent = volume > 100 ? 100 : volume;
     playback_requested = false;
+    ESP_LOGI(TAG, "Audio RAM allocated: %u bytes (temporary, no file storage)",
+             static_cast<unsigned>(speaker_config::audio_buffer_bytes));
+    return ESP_OK;
 }
 
 esp_err_t speaker_audio_push(const uint8_t *data, std::size_t size)
 {
+    if (!pcm_buffer) {
+        return ESP_ERR_INVALID_STATE;
+    }
     while (size > 0) {
         if (xEventGroupGetBits(playback_events) & (PLAYBACK_FAILED | PLAYBACK_FINISHED)) {
             return ESP_FAIL;
@@ -194,6 +247,9 @@ esp_err_t speaker_audio_push(const uint8_t *data, std::size_t size)
         const std::size_t written = xStreamBufferSend(
             pcm_buffer, data, size, pdMS_TO_TICKS(speaker_config::buffer_write_timeout_ms));
         if (written == 0) {
+            ESP_LOGE(TAG, "Buffer write timeout: buffer=%u/%u bytes",
+                     static_cast<unsigned>(xStreamBufferBytesAvailable(pcm_buffer)),
+                     static_cast<unsigned>(speaker_config::audio_buffer_bytes));
             return ESP_ERR_TIMEOUT;
         }
         data += written;
@@ -207,8 +263,16 @@ esp_err_t speaker_audio_push(const uint8_t *data, std::size_t size)
     return ESP_OK;
 }
 
+size_t speaker_audio_buffered_bytes(void)
+{
+    return pcm_buffer ? xStreamBufferBytesAvailable(pcm_buffer) : 0;
+}
+
 esp_err_t speaker_audio_end(bool abort_playback)
 {
+    if (!pcm_buffer) {
+        return ESP_ERR_INVALID_STATE;
+    }
     // Câu ngắn có thể chưa đủ prebuffer: tải xong thì yêu cầu phát ngay.
     EventBits_t flags = DOWNLOAD_FINISHED;
     if (!playback_requested) {
@@ -219,9 +283,22 @@ esp_err_t speaker_audio_end(bool abort_playback)
     }
     xEventGroupSetBits(playback_events, flags);
 
-    const EventBits_t result = xEventGroupWaitBits(playback_events, PLAYBACK_FINISHED,
+    EventBits_t result = xEventGroupWaitBits(playback_events, PLAYBACK_FINISHED,
         pdFALSE, pdFALSE, pdMS_TO_TICKS(speaker_config::playback_finish_timeout_ms));
-    const bool finished = result & PLAYBACK_FINISHED;
-    const bool failed = result & PLAYBACK_FAILED;
-    return finished && !failed ? ESP_OK : ESP_FAIL;
+    const bool timed_out = !(result & PLAYBACK_FINISHED);
+    if (timed_out) {
+        ESP_LOGE(TAG, "Waiting for playback timed out: buffer=%u bytes",
+                 static_cast<unsigned>(speaker_audio_buffered_bytes()));
+        xEventGroupSetBits(playback_events, PLAYBACK_FAILED);
+        result = xEventGroupWaitBits(playback_events, PLAYBACK_FINISHED,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(speaker_config::playback_finish_timeout_ms));
+    }
+    if (result & PLAYBACK_FINISHED) {
+        release_pcm_buffer();
+    } else {
+        // Never free memory while the I2S task might still be reading it.
+        ESP_LOGE(TAG, "Audio cleanup pending: I2S task has not stopped");
+    }
+    return !timed_out && (result & PLAYBACK_FINISHED) && !(result & PLAYBACK_FAILED)
+        ? ESP_OK : ESP_FAIL;
 }

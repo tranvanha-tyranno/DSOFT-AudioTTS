@@ -3,8 +3,8 @@
 /**
  * CẤU HÌNH TRỰC TIẾP TRONG CODE — sửa các giá trị bên dưới rồi build/nạp lại.
  *
- * Bắt đầu bằng wifi_ssid, wifi_password, backend_url và device_token.
- * URL/token lấy từ Dashboard → Kết nối ESP32. Không cần menuconfig cho loa.
+ * Điền WiFi và URL/token trong speaker_config.local.h (file riêng, không lên Git).
+ * URL/token lấy từ Dashboard → Thiết bị. Không cần menuconfig cho loa.
  * sdkconfig.h bên dưới chỉ cung cấp thông tin chip/nền tảng của ESP-IDF.
  *
  * API TTS thật nằm ở backend, không đặt khóa nhà cung cấp trên ESP32.
@@ -20,21 +20,21 @@
 
 namespace speaker_config {
 
-// 1. WIFI — điền tên và mật khẩu mạng WiFi 2,4 GHz của bạn vào hai dòng này.
+// 1-2. WIFI / SERVER - private values stay on the firmware build machine.
+// Copy speaker_config.local.h.example to speaker_config.local.h, then fill in
+// WiFi and the URL/token from Dashboard > Devices. The local file is gitignored.
+#if __has_include("speaker_config.local.h")
+#include "speaker_config.local.h"
+#else
 inline constexpr const char *wifi_ssid = "";
 inline constexpr const char *wifi_password = "";
-
-// 2. SERVER — lấy URL LAN và token từ trang Kết nối ESP32 của dashboard.
-// Ví dụ URL: "http://192.168.1.100:8088". Không dùng localhost, không thêm / cuối.
 inline constexpr const char *backend_url = "";
 inline constexpr const char *device_id = "speaker-01";
 inline constexpr const char *device_token = "";
-inline constexpr bool allow_http_for_development = true;  // Demo HTTP trong LAN.
-inline constexpr int poll_interval_ms = 1000;
-
-// Tùy chọn: SSID trống sẽ dùng WiFi đã lưu hoặc provisioning nếu đã đặt PoP.
-// Nếu điền SSID/mật khẩu trực tiếp ở trên thì không cần đặt PoP.
+inline constexpr bool allow_http_for_development = false;
 inline constexpr const char *provisioning_pop = "";
+#endif
+inline constexpr int poll_interval_ms = 1000;
 inline constexpr const char *time_server = "pool.ntp.org";
 
 // 3. CHÂN I2S — ESP32-S3 gửi dữ liệu âm thanh số sang MAX98357A.

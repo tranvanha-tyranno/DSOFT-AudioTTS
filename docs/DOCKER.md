@@ -2,6 +2,9 @@
 
 Docker chạy cả API và giao diện web; không cần Node.js hay ESP-IDF trên máy chủ. Image có sẵn FFmpeg để chuyển MP3/WAV về PCM cho ESP32-S3.
 
+Hợp đồng API và cấu hình: [API.md](API.md). Sau khi chạy, mở `/docs` cho API tích
+hợp theo user_id, hoặc `/docs/internal` cho dashboard và ESP32.
+
 ## Khởi động
 
 Từ thư mục gốc repo `DSOFT-AudioTTS` (trên máy phát triển hiện tại là `AudioWifiTTS`):
@@ -28,7 +31,7 @@ Mở `http://IP_SERVER:8088/`. Chờ service có trạng thái `healthy`.
 
 ## Server chỉ pull image đã build
 
-Image: `ghcr.io/tranvanha-tyranno/dsoft-audiotts-backend:latest` cho máy chủ **Linux amd64/x86_64**. Workflow `Publish backend image` tự build/push khi mã backend thay đổi trên nhánh `main`; cũng có thể chạy thủ công trong tab Actions. Repo/package giữ private.
+Image: `ghcr.io/tranvanha-tyranno/dsoft-audiotts-backend:latest` cho máy chủ **Linux amd64/x86_64**. Workflow `Publish backend image` tự build/push khi mã backend thay đổi trên nhánh `main`; cũng có thể chạy thủ công trong tab Actions. Nếu package yêu cầu xác thực, đăng nhập GHCR theo hướng dẫn bên dưới.
 
 Trên server, cập nhật code và cấu hình `.env` (chỉ cần sao chép file mẫu ở lần đầu):
 
@@ -78,8 +81,9 @@ Lệnh in đường dẫn đăng nhập cho người vận hành. Có thể đ�
 Sau khi vào web:
 
 1. **Cấu hình TTS:** nhập endpoint, khóa, voice/model, header/body và định dạng audio; bấm lưu.
-2. **Kết nối ESP32:** lấy URL/token của container và chép code vào `main/speaker_config.h` trên máy build firmware.
-3. **Phát thử:** nghe trên trình duyệt hoặc gửi tới board. Chọn Âm mẫu nếu chưa có TTS thật.
+2. **Thiết bị:** lấy URL/token của container và chép code vào `main/speaker_config.local.h` trên máy build firmware. File riêng này không lên Git hoặc Docker image.
+3. **Người dùng:** đăng ký user_id, lời chào và loa vào database.
+4. **Phát theo ID:** chọn người dùng để nghe thử hoặc gửi lệnh tới board. Web gọi `/v1/detect` chỉ với user_id. Chọn Âm mẫu nếu chưa có TTS thật.
 
 ## Dữ liệu được giữ lại
 

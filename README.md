@@ -1,6 +1,10 @@
 # DSOFT-AudioTTS — Loa WiFi đọc văn bản
 
-**Phần cứng:** ESP32-S3 + MAX98357A. **Firmware:** ESP-IDF C++ (`esp32s3`). **API TTS:** để trống để bổ sung sau.
+**Phần cứng:** ESP32-S3 + MAX98357A. **Firmware:** ESP-IDF C++ (`esp32s3`). **API TTS:** cấu hình trên dashboard.
+
+**Tài liệu API:** [docs/API.md](docs/API.md). Đăng ký bằng `POST /v1/users`, phát từ
+database bằng `POST /v1/detect` với `{"user_id":1}`. Swagger tích hợp ở `/docs`;
+API dashboard và ESP32 ở `/docs/internal`.
 
 **Chân loa mặc định trên S3:** GPIO15 → BCLK, GPIO16 → LRC/WS, GPIO7 → DIN. Hướng dẫn nạp và thử kết nối: [NAP_THU_ESP32S3.md](docs/NAP_THU_ESP32S3.md).
 
@@ -34,10 +38,15 @@ Chạy từ `AudioWifiTTS`:
 Dashboard mở tại **http://127.0.0.1:8088/** và tự kết nối bằng khóa demo riêng được tạo trên máy. Nếu thiếu thư viện: `python -m pip install -r backend/requirements.txt`. Trong VS Code cũng có task **P01: Mo dashboard web demo**.
 
 1. **Cấu hình TTS:** chọn API của bạn, điền URL/khóa, voice/model và định dạng trả về. Có thể chỉnh header và JSON request; lưu cấu hình trước khi thử.
-2. **Phát thử:** nhập câu, nghe thử trên web hoặc chọn loa, âm lượng, ưu tiên rồi bấm **Phát trên ESP32**.
-3. **Kết nối ESP32:** đăng ký loa, lấy URL/token hoặc sao chép code C++ vào `main/speaker_config.h`. Với demo HTTP trong LAN, đặt `allow_http_for_development = true` rồi build/nạp.
+2. **Người dùng:** đăng ký user_id, lời chào và loa. Lưu dữ liệu không tự phát âm thanh.
+3. **Phát theo ID:** chọn người dùng để nghe thử hoặc bấm **Phát trên loa**. Web gọi `POST /v1/detect` với body chỉ có `{"user_id":1}`; nội dung và loa lấy từ database.
+4. **Thiết bị:** đăng ký loa, xem URL/token hoặc sao chép cấu hình C++ vào `main/speaker_config.local.h`. Với demo HTTP trong LAN, đặt `allow_http_for_development = true` rồi build/nạp.
 
 ESP32 giữ luồng polling hiện có: backend tạo PCM → loa tải audio → I2S phát → gửi ACK. Nếu loa chưa kết nối, câu nằm ở trạng thái **Chờ loa**. **Âm mẫu** chỉ là beep một giây, không phải giọng nói TTS. Khóa API TTS nằm ở backend; dashboard không gửi khóa nhà cung cấp xuống board.
+
+ESP32 không lưu file WAV/PCM trên flash/SD: cấp buffer RAM khi có job và giải phóng
+sau khi tải/phát kết thúc, kể cả lỗi. Cache backend, người dùng, khóa và lịch sử
+vẫn giữ. “Loa báo hoàn tất” là ACK của firmware, cần nghe thực tế để kiểm tra loa.
 
 Chi tiết và ví dụ JSON: [hướng dẫn dashboard](docs/DASHBOARD.md).
 
@@ -56,7 +65,8 @@ Mở **[AudioWifiTTS.code-workspace](AudioWifiTTS.code-workspace)** trong VS Cod
 | Bạn muốn sửa | Mở |
 |---|---|
 | Trình tự khởi động / vòng lặp chính | [main/app_main.cpp](main/app_main.cpp) |
-| WiFi, URL backend, token, chân nối loa | **[main/speaker_config.h](main/speaker_config.h)** — sửa trực tiếp các giá trị |
+| WiFi, URL backend, token | `main/speaker_config.local.h` — sao chép từ [file mẫu](main/speaker_config.local.h.example), không lên Git |
+| Chân nối loa | [main/speaker_config.h](main/speaker_config.h) |
 | Kích thước buffer / thời gian chờ | [main/speaker_config.h](main/speaker_config.h) |
 | API ESP32 gọi backend | [main/speaker_api.cpp](main/speaker_api.cpp) |
 | Âm lượng / phát I2S | [main/speaker_audio.cpp](main/speaker_audio.cpp) |
@@ -69,7 +79,13 @@ Mở **[AudioWifiTTS.code-workspace](AudioWifiTTS.code-workspace)** trong VS Cod
 
 ## Cấu hình và build
 
-Mở **`main/speaker_config.h`** và điền trực tiếp:
+Sao chép file mẫu rồi mở **`main/speaker_config.local.h`** để điền cấu hình riêng:
+
+```powershell
+Copy-Item main/speaker_config.local.h.example main/speaker_config.local.h
+```
+
+File này được include bên trong namespace `speaker_config`, không thêm namespace lần nữa.
 
 ```cpp
 inline constexpr const char *wifi_ssid = "TEN_WIFI";
@@ -79,7 +95,9 @@ inline constexpr const char *device_id = "speaker-01";
 inline constexpr const char *device_token = "TOKEN_TU_DASHBOARD";
 ```
 
-Thay tên/mật khẩu WiFi, URL LAN và token bằng thông tin thực tế. Dashboard có nút **Sao chép code cấu hình C++** để lấy ba dòng server và cờ HTTP. GPIO cũng sửa trực tiếp trong cùng file: BCLK=15, WS=16, DOUT=7.
+Thay tên/mật khẩu WiFi, URL LAN và token bằng thông tin thực tế. Dashboard → Thiết bị
+có nút **Sao chép cấu hình** để lấy URL, mã loa, token và cờ HTTP. GPIO sửa trong
+`speaker_config.h`: BCLK=15, WS=16, DOUT=7. File `.local.h` không được đưa lên Git/Docker.
 
 Trong workspace, **Ctrl+Shift+B** để build ESP32-S3. Task **P01: Mo code cau hinh WiFi - Server** mở thẳng file cấu hình.
 
@@ -89,9 +107,13 @@ Hoặc chạy tại thư mục `AudioWifiTTS`:
 .\scripts\build.ps1
 ```
 
-Lưu `speaker_config.h`, build rồi nạp lại. Firmware đọc WiFi/server/audio/OTA từ các hằng C++ trong file này. `sdkconfig`/`sdkconfig.h` chỉ còn dành cho nền tảng ESP-IDF như chip, flash và console.
+Lưu `speaker_config.local.h`, build rồi nạp lại. WiFi/server nằm trong file riêng,
+còn audio/OTA trong `speaker_config.h`. `sdkconfig`/`sdkconfig.h` dành cho nền tảng
+ESP-IDF như chip, flash và console.
 
-Chưa điền token thì firmware báo thiếu cấu hình khi boot. Chưa cấu hình TTS thì backend chưa đọc được văn bản; chế độ `tone` chỉ phát beep thử loa. Bản này chưa nạp và nghiệm thu trên board.
+Chưa điền token thì firmware báo thiếu cấu hình khi boot. Chưa cấu hình TTS thì
+backend chưa đọc được văn bản; chế độ `tone` chỉ phát beep thử loa. Đã kiểm tra
+nạp ESP32-S3, nhận job và giải phóng RAM; cần nghe thực tế để nghiệm thu âm thanh.
 
 ## VS Code gạch đỏ ở dòng include?
 

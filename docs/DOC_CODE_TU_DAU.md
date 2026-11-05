@@ -96,7 +96,14 @@ flowchart LR
     E --> F[I2S → MAX98357A → loa]
 ```
 
-`speaker_audio_begin()` xóa trạng thái câu trước. `speaker_audio_push()` ghi dữ liệu mới vào buffer. Đủ 12 KB thì yêu cầu tác vụ phát bắt đầu. `speaker_audio_end()` báo đã tải xong và chờ phát nốt. Câu ngắn dưới 12 KB sẽ bắt đầu phát lúc tải xong.
+`speaker_audio_begin()` cấp buffer RAM 32 KiB cho câu mới và trả lỗi nếu thiếu RAM
+hoặc tác vụ phát trước chưa dừng. `speaker_audio_push()` ghi dữ liệu vào buffer.
+Đủ 12 KiB thì yêu cầu tác vụ phát bắt đầu. `speaker_audio_end()` báo tải xong,
+đợi I2S dừng rồi giải phóng buffer. Câu ngắn dưới 12 KiB bắt đầu phát khi tải xong.
+Nếu tải hoặc phát lỗi, buffer cũng được thu hồi sau khi cả hai tác vụ dừng.
+Nếu I2S chưa dừng sau timeout, không giải phóng bộ nhớ đang được đọc; lần bắt đầu
+kế tiếp thu hồi buffer cũ khi tác vụ đã kết thúc. Monitor ghi cấp/giải phóng RAM.
+Không ghi file audio vào flash/SD; cache PCM trên backend vẫn được giữ.
 
 PCM16 là mẫu âm thanh có dấu, mỗi mẫu 2 byte. Nửa dương và nửa âm đều phải được giảm đúng khi đổi volume. Hàm `scale_pcm_sample()` xử lý việc này. HTTP có thể chia một mẫu thành hai phần; code giữ byte đầu lại để ghép với byte tiếp theo.
 

@@ -1,0 +1,10 @@
+#pragma once
+// Copy to speaker_config.local.h and fill in your own device connection values.
+// Included inside namespace speaker_config; do not add a namespace.
+inline constexpr const char *wifi_ssid = "";
+inline constexpr const char *wifi_password = "";
+inline constexpr const char *backend_url = "";
+inline constexpr const char *device_id = "speaker-01";
+inline constexpr const char *device_token = "";
+inline constexpr bool allow_http_for_development = false;
+inline constexpr const char *provisioning_pop = "";

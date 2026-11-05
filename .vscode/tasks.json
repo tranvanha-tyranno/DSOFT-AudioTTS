@@ -19,10 +19,18 @@
             "problemMatcher": ["$gcc"]
         },
         {
+            "label": "P01: Tu nap ESP32-S3 (auto reset)",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/build.ps1", "-Action", "flash", "-Port", "${input:speakerPort}"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
             "label": "P01: Mo code cau hinh WiFi - Server",
             "type": "process",
             "command": "${execPath}",
-            "args": ["--reuse-window", "${workspaceFolder}/main/speaker_config.h"],
+            "args": ["--reuse-window", "${workspaceFolder}/main/speaker_config.local.h"],
             "options": { "cwd": "${workspaceFolder}" },
             "problemMatcher": []
         },
@@ -33,6 +41,14 @@
             "args": ["-m", "pytest", "backend/tests", "-q"],
             "options": { "cwd": "${workspaceFolder}" },
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "speakerPort",
+            "type": "promptString",
+            "description": "Cong COM cua ESP32-S3",
+            "default": "COM7"
         }
     ]
 }

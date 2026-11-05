@@ -77,7 +77,9 @@ static esp_http_client_handle_t open_request(const char *path, const char *body 
         esp_http_client_set_method(client, HTTP_METHOD_POST);
         esp_http_client_set_header(client, "Content-Type", "application/json");
     }
-    if (esp_http_client_open(client, body ? strlen(body) : 0) != ESP_OK) {
+    const esp_err_t opened = esp_http_client_open(client, body ? strlen(body) : 0);
+    if (opened != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(opened));
         goto failed;
     }
     if (body) {
@@ -92,6 +94,7 @@ static esp_http_client_handle_t open_request(const char *path, const char *body 
         }
     }
     if (esp_http_client_fetch_headers(client) < 0) {
+        ESP_LOGE(TAG, "HTTP response headers failed");
         goto failed;
     }
     return client;
@@ -188,43 +191,70 @@ bool speaker_api_next_job(SpeakerJob &job)
 
 bool speaker_api_play_job(const SpeakerJob &job)
 {
+    const int64_t started = esp_timer_get_time();
+    ESP_LOGI(TAG, "Audio job %s: expected=%d bytes, duration=%.2f s", job.id,
+             job.audio_bytes, static_cast<double>(job.audio_bytes) /
+                                 (speaker_config::sample_rate_hz * speaker_config::pcm_bytes_per_sample));
     char path[240];
     snprintf(path, sizeof(path), "/v1/devices/%s/audio/%s?lease=%s",
              speaker_config::device_id, job.id, job.lease);
     esp_http_client_handle_t client = open_request(path);
     if (!client) {
+        ESP_LOGE(TAG, "Audio request failed for job %s", job.id);
         return false;
     }
 
     const int64_t content_length = esp_http_client_get_content_length(client);
     if (esp_http_client_get_status_code(client) != 200 || content_length != job.audio_bytes) {
+        ESP_LOGE(TAG, "Audio response rejected: HTTP %d, length=%lld, expected=%d",
+                 esp_http_client_get_status_code(client), content_length, job.audio_bytes);
         close_request(client);
         return false;
     }
 
-    speaker_audio_begin(job.volume_percent);
+    const esp_err_t begin_result = speaker_audio_begin(job.volume_percent);
+    if (begin_result != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot begin audio: %s", esp_err_to_name(begin_result));
+        close_request(client);
+        return false;
+    }
     uint8_t chunk[speaker_config::download_chunk_bytes];
     std::size_t downloaded = 0;
     bool download_ok = true;
+    int64_t last_progress = esp_timer_get_time();
     const int64_t deadline = esp_timer_get_time() +
                              static_cast<int64_t>(speaker_config::playback_deadline_ms) * 1000;
 
     // Chỉ giữ một phần audio trong RAM; tác vụ I2S đọc buffer song song.
     while (downloaded < static_cast<std::size_t>(job.audio_bytes)) {
         if (esp_timer_get_time() > deadline) {
+            ESP_LOGE(TAG, "Audio deadline exceeded: %u/%d bytes",
+                     static_cast<unsigned>(downloaded), job.audio_bytes);
             download_ok = false;
             break;
         }
         const int received = esp_http_client_read(client, reinterpret_cast<char *>(chunk), sizeof(chunk));
         if (received <= 0 || downloaded + received > static_cast<std::size_t>(job.audio_bytes)) {
+            ESP_LOGE(TAG, "Audio read stopped: received=%d, downloaded=%u/%d",
+                     received, static_cast<unsigned>(downloaded), job.audio_bytes);
             download_ok = false;
             break;
         }
         if (speaker_audio_push(chunk, received) != ESP_OK) {
+            ESP_LOGE(TAG, "Audio buffer push failed at %u/%d bytes",
+                     static_cast<unsigned>(downloaded), job.audio_bytes);
             download_ok = false;
             break;
         }
         downloaded += received;
+        const int64_t now = esp_timer_get_time();
+        if (now - last_progress >= 1000000) {
+            ESP_LOGI(TAG, "Audio transfer: %u/%d bytes, buffer=%u/%u, elapsed=%lld ms",
+                     static_cast<unsigned>(downloaded), job.audio_bytes,
+                     static_cast<unsigned>(speaker_audio_buffered_bytes()),
+                     static_cast<unsigned>(speaker_config::audio_buffer_bytes), (now - started) / 1000);
+            last_progress = now;
+        }
     }
 
     download_ok = download_ok && downloaded == static_cast<std::size_t>(job.audio_bytes) &&
@@ -234,6 +264,9 @@ bool speaker_api_play_job(const SpeakerJob &job)
     // Tải xong chưa có nghĩa là phát xong: đợi phần còn trong buffer ra hết I2S.
     const bool abort_playback = !download_ok;
     const esp_err_t playback_result = speaker_audio_end(abort_playback);
+    ESP_LOGI(TAG, "Audio job %s finished: downloaded=%u/%d, download_ok=%d, playback=%s, elapsed=%lld ms",
+             job.id, static_cast<unsigned>(downloaded), job.audio_bytes, download_ok,
+             esp_err_to_name(playback_result), (esp_timer_get_time() - started) / 1000);
     return download_ok && playback_result == ESP_OK;
 }
 
@@ -250,6 +283,7 @@ static bool send_ack_once(const SpeakerJob &job, bool played)
         return false;
     }
     const int status = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "ACK job %s: result=%s, HTTP %d", job.id, played ? "played" : "failed", status);
     close_request(client);
 
     // 404/409: job không còn hoặc lease đã hết; gửi lại ACK không giải quyết được.
@@ -262,6 +296,7 @@ void speaker_api_report_result(const SpeakerJob &job, bool played)
         if (send_ack_once(job, played)) {
             return;
         }
+        ESP_LOGW(TAG, "ACK retry %d/%d for job %s", attempt + 1, speaker_config::ack_attempts, job.id);
         vTaskDelay(pdMS_TO_TICKS(speaker_config::ack_retry_delay_ms));
     }
     ESP_LOGW(TAG, "Chua gui duoc ACK cho job %s; khong phat lai cau", job.id);

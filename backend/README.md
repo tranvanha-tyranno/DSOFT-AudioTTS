@@ -1,5 +1,9 @@
 # Backend — phần chạy trên máy chủ
 
+**Tài liệu API và cấu hình:** xem [docs/API.md](../docs/API.md).
+Đăng ký bằng `POST /v1/users`, gọi phát bằng `POST /v1/detect`, quản lý ở trang **Người dùng**.
+Swagger tích hợp ở `/docs`; dashboard và firmware ở `/docs/internal`.
+
 Không nạp thư mục này lên ESP32. Chạy Python tại thư mục gốc `AudioWifiTTS`.
 
 **Vận hành bằng Docker:** làm theo [docs/DOCKER.md](../docs/DOCKER.md), chạy `docker compose up -d --build` từ gốc repo. Container có sẵn FFmpeg và giữ dữ liệu trong volume.
@@ -9,6 +13,9 @@ Không nạp thư mục này lên ESP32. Chạy Python tại thư mục gốc `A
 | File | Đọc khi cần |
 |---|---|
 | `app.py` | API nhận yêu cầu, xác thực, cache, SQLite, xếp hàng và báo trạng thái |
+| `detection.py` | Đăng ký người dùng, ánh xạ mã loa và phát theo user_id |
+| `api_docs.py` | Tách Swagger tích hợp và Swagger vận hành |
+| `config.py` | Giới hạn văn bản và âm thanh dùng chung cho backend |
 | `dashboard.py` | Lưu/đọc cấu hình TTS, đăng ký loa, nghe thử WAV, lịch sử và trạng thái kết nối |
 | `static/` | Giao diện HTML/CSS/JavaScript, không cần npm build |
 | `demo.py` | Khởi chạy demo và tạo khóa operator/device riêng trên máy |
